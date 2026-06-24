@@ -33,10 +33,11 @@
       <!-- gripper re-attaches 7 mm further along tool axis -->
       <site name="tool0" pos="0 0 0.007" size="0.001"/>
 
-      <!-- D435i mount: xyz=[0,-0.067,0.0171], rpy=[0,-pi/2+0.1047,pi/2] -->
+      <!-- D435i mount: offset side-mounted, optical axis aimed along tool +Z
+           quat = Rx(-90°) * q_urdf so D435i +Z (optical) → bracket +Z (workspace) -->
       <site name="camera_mount"
             pos="0 -0.067 0.0171"
-            quat="0.5255 0.4732 -0.4732 0.5255"
+            quat="0.706139 -0.036979 0.036979 0.706139"
             size="0.001"/>
     </body>
   </worldbody>

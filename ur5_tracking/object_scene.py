@@ -166,9 +166,11 @@ def build_scene(cfg: Config) -> "mujoco.MjSpec":
         if d435i_xml and os.path.exists(d435i_xml):
             d435i_spec = mujoco.MjSpec.from_file(d435i_xml)
             spec.site("adapter_camera_mount").attach_body(d435i_spec.body("d435i"), "d435i_", "")
+            # D435i optical axis is +Z in body frame; MuJoCo cameras look along
+            # -Z, so 180° around X flips the view to look along +Z (workspace).
             spec.body("d435i_d435i").add_camera(
                 name="gripper_cam", pos=[0.0, 0.0, 0.0],
-                quat=[0.7071068, 0.0, -0.7071068, 0.0],
+                quat=[0, 1, 0, 0],
                 fovy=87, mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
         else:
             spec.body("adapter_adapter").add_camera(
