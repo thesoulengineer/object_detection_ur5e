@@ -5,8 +5,9 @@ pyyaml>=6.0
 imageio>=2.31
 
 # --- Phase 2: hardware deployment (Windows, no ROS2) ------------------------
-# pip install ur-rtde pyrobotiqgripper minimalmodbus opencv-contrib-python
-# ur-rtde>=2.3.0          # UR5e RTDE interface (RTDEControlInterface, RTDEReceiveInterface)
-# pyrobotiqgripper>=0.1.0 # Robotiq 2F-85 over USB-RS485 Modbus
-# minimalmodbus>=2.1.0    # serial Modbus backend for pyrobotiqgripper
-# opencv-contrib-python>=4.8.0  # ArUco marker detection for object pose
+# pip install ur-rtde pyrobotiqgripper minimalmodbus opencv-contrib-python pyrealsense2
+# ur-rtde>=2.3.0               # UR5e RTDE interface (RTDEControlInterface, RTDEReceiveInterface)
+# pyrobotiqgripper>=0.1.0      # Robotiq 2F-85 over USB-RS485 Modbus
+# minimalmodbus>=2.1.0         # serial Modbus backend for pyrobotiqgripper
+# opencv-contrib-python>=4.8.0 # ArUco marker detection for object pose
+# pyrealsense2>=2.54.0         # Intel RealSense D435i SDK (falls back to OpenCV if absent)
