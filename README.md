@@ -6,110 +6,151 @@ the gripper-mounted camera follows it like a snake's head. When the object is
 position**, then resumes tracking.
 
 This is a **closed-loop simulation**: every control step reads the object pose
-from the simulator's ground truth. (It is not an open-loop trajectory for a real
-robot — that would require real perception, e.g. a camera + object detector.)
+from the simulator's ground truth. A RealSense D435i is modelled on the gripper
+for hand-eye calibration and ArUco-based detection workflows.
 
-## What you get
+## Repository layout
 
 ```
-object detection/
-├─ config.yaml                 # single source of truth (robot, env, object, behaviour)
-├─ track_and_retrieve.py       # main entry point (interactive / --auto / --headless)
+object_detection_ur5e/
+├─ config.yaml                   # single source of truth (robot, env, object, behaviour)
+├─ track_and_retrieve.py         # main entry point (interactive / --auto / --headless)
+├─ calibrate_camera.py           # intrinsic camera calibration helper
+├─ calibrate_handeye.py          # hand-eye calibration (robot ↔ camera)
 ├─ requirements.txt
 ├─ mujoco_menagerie/
-│  ├─ universal_robots_ur5e/   # UR5e model (bundled)
-│  └─ robotiq_2f85/            # gripper model (bundled)
-└─ ur5_tracking/               # the package
-   ├─ config_loader.py         # load + validate config.yaml
-   ├─ object_scene.py          # build scene: UR5e + gripper + object + camera + grasp weld
-   ├─ track_control.py         # state readouts, aim/reach IK, grasp (weld)
-   ├─ track_states.py          # finite state machine: track -> pick -> return
-   └─ auto_object.py           # scripted object motion for --auto mode
+│  ├─ universal_robots_ur5e/     # UR5e MJCF model (bundled)
+│  ├─ robotiq_2f85/              # 2F-85 gripper model (bundled)
+│  ├─ realsense_d435i/           # D435i camera model (bundled)
+│  └─ picknik_ur_realsense_adapter/  # camera mount adapter (bundled)
+└─ ur5_tracking/                 # the core package
+   ├─ config_loader.py           # load + validate config.yaml
+   ├─ object_scene.py            # build scene: UR5e + gripper + camera + object
+   ├─ track_control.py           # state readouts, gaze/reach IK, grasp weld
+   ├─ track_states.py            # finite state machine: track → pick → return
+   ├─ auto_object.py             # scripted object motion for --auto mode
+   ├─ aruco_detector.py          # ArUco marker detection via the D435i
+   ├─ sim_interface.py           # MuJoCo simulation interface
+   ├─ robot_interface.py         # robot command interface (sim + real)
+   └─ hardware_interface.py      # real-hardware UR5e communication layer
 ```
 
-## Install
+## Installation
 
-```powershell
+```bash
 python -m venv .venv
+# Linux / macOS
+source .venv/bin/activate
+# Windows PowerShell
 .\.venv\Scripts\Activate.ps1
+
 pip install -r requirements.txt
 ```
 
-(Only `mujoco`, `numpy`, `pyyaml` are required; `imageio` is optional, for `--record`.)
+Required packages: `mujoco`, `numpy`, `pyyaml`.  
+Optional: `imageio` (for `--record`), `opencv-python` (for ArUco detection).
 
-## Run
+## Running the simulation
 
-```powershell
-# Interactive: drag the blue object with Ctrl + right-mouse-drag in the viewer.
+```bash
+# Interactive — drag the blue object with Ctrl + right-mouse-drag in the viewer
 python track_and_retrieve.py
 
-# The object moves on its own, then is left; the arm retrieves it. Repeats.
+# Scripted motion: object moves on its own, arm retrieves it; repeats
 python track_and_retrieve.py --auto
 
-# No display (quick verification): prints state transitions + placement accuracy.
+# Headless (no display): prints state transitions + placement accuracy
 python track_and_retrieve.py --headless --seconds 30
 
-# Record the gripper camera while running headless.
+# Headless + record the gripper camera to a video file
 python track_and_retrieve.py --headless --seconds 30 --record run.mp4
 ```
 
-In the interactive viewer, drag the object around — the arm aims at it. Let go;
-once it is stationary for ~1.5 s and away from home, the arm picks it up and
-places it back on the green marker.
+In the interactive viewer, drag the object around — the arm aims at it. Release
+it; once stationary for ~1.5 s and away from home, the arm picks it up and
+places it back on the green home marker.
 
-## Cameras & viewing
+## Cameras & viewer controls
 
-The scene ships with a skybox, a checkered floor, a wooden work table, metal /
-glossy materials, and soft shadows, with a sensible default camera angle.
+The scene includes a skybox, checkered floor, wooden work table, and soft
+shadows. Two named cameras are available — press **Tab** (or `[` / `]`) to cycle:
 
-Two named cameras are available; press **Tab** (or `[` / `]`) in the viewer to
-cycle:
-- **overview** — auto-frames the object (stays pointed at it as it moves).
-- **gripper_cam** — the gripper's-eye view, looking along the tool approach axis.
+| Camera | Description |
+|--------|-------------|
+| `overview` | Auto-frames the object; stays pointed at it as it moves |
+| `gripper_cam` | Gripper's-eye view, looking along the tool approach axis |
 
-You can still orbit/pan/zoom the free camera with the mouse at any time.
+The free camera remains available for orbiting, panning, and zooming with the
+mouse at any time.
 
-## How it works
+## Calibration utilities
 
-State machine (`ur5_tracking/track_states.py`):
+```bash
+# Collect images and compute D435i intrinsics
+python calibrate_camera.py
+
+# Run hand-eye calibration (robot poses ↔ ArUco detections)
+python calibrate_handeye.py
+```
+
+## State machine
+
+`ur5_tracking/track_states.py` implements the following cycle:
 
 ```
-TRACK -> APPROACH -> DESCEND -> GRASP -> LIFT -> CARRY -> PLACE -> RELEASE -> RETREAT -> TRACK
+TRACK → APPROACH → DESCEND → GRASP → LIFT → CARRY → PLACE → RELEASE → RETREAT → TRACK
 ```
 
-- **TRACK (gaze):** the arm holds the "perch" pose and only re-orients so the
-  tool +z axis (and the camera) points at the object. It watches the object's
-  speed; if it stays below `tracking.idle_speed` for `tracking.idle_time` and is
-  not already home, it starts a retrieve.
-- **GRASP / RELEASE:** the gripper closes/opens and a weld constraint is
-  enabled/disabled.
-- Each motion phase advances when the target is reached, when progress stalls,
-  or after an 8 s safety timeout — so it never deadlocks.
+| State | Behaviour |
+|-------|-----------|
+| **TRACK** | Holds the perch pose; re-orients so the camera points at the object. Starts retrieve when object is idle for `tracking.idle_time` and is not at home. |
+| **APPROACH / DESCEND** | IK-based motion toward the grasp pose. |
+| **GRASP / RELEASE** | Closes/opens the gripper and enables/disables the weld constraint. |
+| **LIFT / CARRY / PLACE** | Moves the object from grasp position to the home marker. |
+| **RETREAT** | Returns to the perch pose before resuming tracking. |
 
-All tunable numbers live in `config.yaml`: `robot`, `gripper`, environment
-(`platform`, `obstacles`, `work_surface`, `floor_z`), `object`, `home_return`,
-`tracking`, and `pick`.
+Each phase advances when the target is reached, when progress stalls, or after
+an 8 s safety timeout — the arm never deadlocks.
 
-## Design notes (honest)
+## Configuration
 
-1. **The grasp is a weld, not pure friction.** The 2F-85 visibly closes, but the
-   hold is guaranteed by a MuJoCo weld equality enabled at grasp time. Pure
-   contact grasping in MuJoCo is fragile (slip, closing force, friction tuning);
-   the weld keeps the demo reliable. For realistic contact grasping, disable the
-   weld in `track_control.set_grasp` and tune the gripper friction/force.
+All tunable parameters live in `config.yaml`:
 
-2. **A "work surface" was added.** The main platform sits under the base and is
-   too narrow in +y, so an object placed in the workspace would fall. A static
-   surface in front of the robot (within reach) gives the object somewhere to
-   rest. Edit `work_surface` in the config for your real setup.
+- `robot` — joint names, limits, end-effector site
+- `gripper` — open/close control values
+- `camera` — D435i and adapter paths
+- `platform`, `floor_z`, `work_surface` — environment geometry
+- `object` — initial pose, size, colour
+- `tracking` — idle speed/time thresholds, gaze gain
+- `pick` — approach offset, lift height, grasp tolerance
+- `home_return` — home position and placement tolerance
 
-3. **Snake-like tracking = gaze control.** The arm keeps its perch position and
-   only changes orientation to keep the camera pointed at the object, so the
-   "head" follows while the body stays roughly put.
+## Design notes
+
+1. **Weld-based grasp.** The 2F-85 visibly closes, but the hold is guaranteed by
+   a MuJoCo weld equality constraint enabled at grasp time. Pure contact grasping
+   is fragile in simulation (slip, closing force, friction tuning); the weld keeps
+   the demo reliable. To experiment with contact grasping, disable the weld in
+   `track_control.set_grasp` and tune gripper friction/force.
+
+2. **Work surface.** The main platform under the base is too narrow in +y for the
+   object to rest on. A static surface in front of the robot (within reach) is
+   added as the resting area. Edit `work_surface` in `config.yaml` to match your
+   real setup.
+
+3. **Gaze control.** The arm keeps its perch position and only changes orientation
+   to keep the camera pointed at the object — snake-like head tracking while the
+   body stays roughly put.
+
+4. **Hardware layer.** `hardware_interface.py` and `robot_interface.py` provide a
+   path toward deploying on a physical UR5e. The simulation interface
+   (`sim_interface.py`) exposes the same API so the control logic is robot-agnostic.
 
 ## Verification
 
-`--headless` reports the state transitions, the number of completed retrieve
-cycles, and the placement error at each release. In a 30 s `--auto` run, four
-cycles complete with placement errors of ~2-5 mm (mean ~3 mm). The
-`preview_*.png` images show the rendered scene.
+`--headless` reports state transitions, completed retrieve cycles, and placement
+error at each release. In a 30 s `--auto` run, four cycles typically complete
+with placement errors of ~2–5 mm (mean ~3 mm).
+
+Preview images (`preview_*.png`) in the repo root show the rendered scene at key
+states (TRACK, DESCEND, CARRY).
