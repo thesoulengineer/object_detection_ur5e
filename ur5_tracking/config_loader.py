@@ -48,10 +48,6 @@ class Config:
         return self.abspath(self.require("robot", "menagerie_ur5e_dir"))
 
     @property
-    def menagerie_2f85_dir(self) -> str:
-        return self.abspath(self.require("gripper", "menagerie_2f85_dir"))
-
-    @property
     def menagerie_d435i_dir(self) -> str | None:
         path = self.get("camera", "menagerie_d435i_dir", default=None)
         return self.abspath(path) if path is not None else None
@@ -97,7 +93,7 @@ def _validate(cfg: Config) -> None:
     if cfg.arr("platform", "size").shape != (3,):
         raise ConfigError("platform.size must have 3 values.")
 
-    for sect in ("object", "work_surface", "tracking", "pick", "home_return"):
+    for sect in ("object", "work_surface", "tracking"):
         if cfg.get(sect) is None:
             raise ConfigError(f"Missing required config section: {sect}")
 
@@ -112,5 +108,4 @@ if __name__ == "__main__":
     c = load_config(sys.argv[1] if len(sys.argv) > 1 else "config.yaml")
     print("Config OK.")
     print("  ur5e dir :", c.menagerie_ur5e_dir)
-    print("  2f85 dir :", c.menagerie_2f85_dir)
     print("  obstacles:", [o["name"] for o in c.get("obstacles", default=[])])

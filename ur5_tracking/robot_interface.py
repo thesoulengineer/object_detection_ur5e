@@ -33,13 +33,5 @@ class RobotInterface(ABC):
         """Send desired joint angles (6,) to the arm."""
 
     @abstractmethod
-    def command_gripper(self, close: bool) -> None:
-        """Open or close the gripper."""
-
-    @abstractmethod
-    def set_grasp(self, on: bool) -> None:
-        """Enable/disable grasp coupling. No-op on hardware."""
-
-    @abstractmethod
     def get_time(self) -> float:
         """Elapsed time in seconds (sim time or wall clock)."""

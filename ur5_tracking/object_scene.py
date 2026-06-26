@@ -1,15 +1,16 @@
-"""Build the MuJoCo scene for the track / pick / return task.
+"""Build the MuJoCo scene for the hover-tracking task (no gripper).
 
 Starts from the UR5e model and adds:
-  - a Robotiq 2F-85 gripper (attached to the flange),
-  - a RealSense D435i depth camera (attached to the gripper, visual only),
+  - a RealSense D435i depth camera (attached directly to the flange, visual only),
   - a free-floating object the user can drag (or a script can move),
-  - a camera mounted on the gripper, aligned with the tool approach axis,
-  - a WELD equality (object <-> gripper) enabled while grasping (stable hold),
+  - a camera site on the flange aligned with the tool approach axis,
   - visual polish: skybox, checkered floor, materials, lights, shadows, and a
     sensible default viewing angle plus an "overview" camera.
 
-Built with MjSpec so the UR5e, 2F-85, and D435i assets resolve automatically.
+Note: the Robotiq 2F-85 gripper and grasp weld are intentionally absent — no
+gripper is available in the lab.  The pick-and-place states (APPROACH, DESCEND,
+GRASP, LIFT, CARRY, PLACE, RELEASE, RETREAT) are preserved as stubs in
+track_states.py for future use once a gripper is available.
 
 Note: box sizes in config are FULL extents; MuJoCo uses half-extents, so we
 divide by 2 here.
@@ -36,7 +37,6 @@ def _link_texture(material, tex_name: str) -> None:
 
 def _add_visuals(spec, cfg: Config) -> None:
     """Skybox, ground, materials, lights and default camera framing."""
-    # --- skybox + checkered ground -------------------------------------------
     spec.add_texture(name="skybox", type=mujoco.mjtTexture.mjTEXTURE_SKYBOX,
                      builtin=mujoco.mjtBuiltin.mjBUILTIN_GRADIENT,
                      rgb1=[0.32, 0.45, 0.62], rgb2=[0.04, 0.07, 0.12],
@@ -49,7 +49,6 @@ def _add_visuals(spec, cfg: Config) -> None:
     grid = spec.add_material(name="grid", texrepeat=[8, 8], reflectance=0.12, shininess=0.1)
     _link_texture(grid, "grid_tex")
 
-    # --- surface / object materials ------------------------------------------
     table = spec.add_material(name="table_mat", rgba=[0.62, 0.46, 0.32, 1.0],
                               reflectance=0.05, shininess=0.2, specular=0.2)
     spec.add_material(name="platform_mat", rgba=[0.55, 0.57, 0.60, 1.0],
@@ -61,7 +60,6 @@ def _add_visuals(spec, cfg: Config) -> None:
                       reflectance=0.05, shininess=0.2)
     _ = table
 
-    # --- lighting ------------------------------------------------------------
     hl = spec.visual.headlight
     hl.ambient = [0.42, 0.42, 0.42]
     hl.diffuse = [0.45, 0.45, 0.45]
@@ -75,7 +73,6 @@ def _add_visuals(spec, cfg: Config) -> None:
                              type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
                              castshadow=False, diffuse=[0.3, 0.3, 0.35])
 
-    # --- global look + default framing ---------------------------------------
     g = spec.visual.global_
     g.azimuth = 140
     g.elevation = -22
@@ -84,9 +81,6 @@ def _add_visuals(spec, cfg: Config) -> None:
     spec.visual.map.haze = 0.0
     spec.stat.center = [-0.1, 0.25, 0.25]
     spec.stat.extent = 1.15
-
-    # overview camera that keeps the object framed (press Tab / [ ] to switch).
-    # Defined later, after the object body exists.
 
 
 def _add_environment(spec, cfg: Config) -> None:
@@ -116,14 +110,10 @@ def _add_environment(spec, cfg: Config) -> None:
 def build_scene(cfg: Config) -> "mujoco.MjSpec":
     """Assemble and return the full MjSpec (uncompiled)."""
     ur5e_xml = os.path.join(cfg.menagerie_ur5e_dir, "ur5e.xml")
-    grip_xml = os.path.join(cfg.menagerie_2f85_dir, "2f85.xml")
-    for p in (ur5e_xml, grip_xml):
-        if not os.path.exists(p):
-            raise ConfigError(f"Model file not found: {p}")
+    if not os.path.exists(ur5e_xml):
+        raise ConfigError(f"Model file not found: {ur5e_xml}")
 
     spec = mujoco.MjSpec.from_file(ur5e_xml)
-    grip = mujoco.MjSpec.from_file(grip_xml)
-
     spec.body("base").pos = cfg.arr("base", "position")
 
     _add_visuals(spec, cfg)
@@ -138,78 +128,40 @@ def build_scene(cfg: Config) -> "mujoco.MjSpec":
                  mass=float(cfg.get("object", "mass", default=0.2)),
                  friction=[1.0, 0.02, 0.001], contype=1, conaffinity=1, group=1)
 
-    # --- visual marker for the home position (flat pad on the table top) ------
-    home = cfg.arr("home_return", "position")
-    ws = cfg.get("work_surface")
-    pad_z = (ws["center"][2] + ws["size"][2] / 2.0 + 0.002) if ws else float(home[2])
-    spec.worldbody.add_site(name="home_marker", pos=[float(home[0]), float(home[1]), pad_z],
-                            type=mujoco.mjtGeom.mjGEOM_BOX,
-                            size=[float(osz[0] * 0.7), float(osz[1] * 0.7), 0.0015],
-                            rgba=[0.2, 0.95, 0.4, 0.55], group=2)
-
-    # --- PickNik adapter bracket + gripper + D435i (eye-in-hand) -------------
-    # Kinematic chain: UR5e flange → adapter bracket → gripper  (at bracket tool0, +7 mm)
-    #                                                → D435i    (at bracket camera_mount)
-    # Falls back to direct flange attach if the adapter dir is absent.
-    adapter_dir = cfg.menagerie_adapter_dir
-    adapter_xml = os.path.join(adapter_dir, "adapter.xml") if adapter_dir else None
+    # --- camera + tool site on the flange (no gripper) -----------------------
+    # Attach the D435i directly to the UR5e attachment_site if available,
+    # otherwise add a simple camera on the flange body.
+    ee_site_name = cfg.get("robot", "ee_site", default="attachment_site")
     d435i_dir = cfg.menagerie_d435i_dir
     d435i_xml = os.path.join(d435i_dir, "d435i.xml") if d435i_dir else None
-    ee_site_name = cfg.get("robot", "ee_site", default="attachment_site")
 
-    if adapter_xml and os.path.exists(adapter_xml):
-        adapter_spec = mujoco.MjSpec.from_file(adapter_xml)
-        spec.site(ee_site_name).attach_body(adapter_spec.body("adapter"), "adapter_", "")
-        # gripper hangs off bracket's tool0 site (7 mm further along tool axis)
-        spec.site("adapter_tool0").attach_body(grip.body("base_mount"), "2f85_", "")
-        # camera hangs off bracket's camera_mount site (side-mounted at URDF angles)
-        if d435i_xml and os.path.exists(d435i_xml):
-            d435i_spec = mujoco.MjSpec.from_file(d435i_xml)
-            spec.site("adapter_camera_mount").attach_body(d435i_spec.body("d435i"), "d435i_", "")
-            # D435i optical axis is +Z in body frame; MuJoCo cameras look along
-            # -Z, so 180° around X flips the view to look along +Z (workspace).
-            spec.body("d435i_d435i").add_camera(
-                name="gripper_cam", pos=[0.0, 0.0, 0.0],
-                quat=[0, 1, 0, 0],
-                fovy=87, mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
-        else:
-            spec.body("adapter_adapter").add_camera(
-                name="gripper_cam",
-                pos=[0.0, -0.067, 0.0171],
-                quat=[0.5255, 0.4732, -0.4732, 0.5255],
-                fovy=87, mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+    if d435i_xml and os.path.exists(d435i_xml):
+        d435i_spec = mujoco.MjSpec.from_file(d435i_xml)
+        spec.site(ee_site_name).attach_body(d435i_spec.body("d435i"), "d435i_", "")
+        spec.body("d435i_d435i").add_camera(
+            name="gripper_cam", pos=[0.0, 0.0, 0.0],
+            quat=[0, 1, 0, 0],
+            fovy=87, mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+        # Tool control point: tip of where the gripper finger tips would have been
+        spec.body("d435i_d435i").add_site(
+            name="ee_cam_site", pos=[0.0, 0.0, 0.12],
+            type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[0.008],
+            rgba=[1.0, 0.3, 0.1, 0.7], group=2)
     else:
-        # no bracket — attach gripper directly to flange
-        spec.site(ee_site_name).attach_body(grip.body("base_mount"), "2f85_", "")
-        if d435i_xml and os.path.exists(d435i_xml):
-            d435i_spec = mujoco.MjSpec.from_file(d435i_xml)
-            mount = spec.body("2f85_base").add_site(
-                name="d435i_mount", pos=[0.0, 0.0, 0.05],
-                quat=[0.7071068, 0.0, 0.7071068, 0.0])
-            mount.attach_body(d435i_spec.body("d435i"), "d435i_", "")
-            spec.body("d435i_d435i").add_camera(
-                name="gripper_cam", pos=[0.0, 0.0, 0.0], quat=[0, 1, 0, 0],
-                fovy=87, mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
-        else:
-            spec.body("2f85_base").add_camera(
-                name="gripper_cam", pos=[0.05, 0.0, 0.02], quat=[0, 1, 0, 0],
-                fovy=58, mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+        # Fallback: add camera and site directly on the flange site body
+        flange_body = spec.site(ee_site_name).body
+        flange_body.add_camera(
+            name="gripper_cam", pos=[0.05, 0.0, 0.02], quat=[0, 1, 0, 0],
+            fovy=58, mode=mujoco.mjtCamLight.mjCAMLIGHT_FIXED)
+        spec.site(ee_site_name).body.add_site(
+            name="ee_cam_site", pos=[0.0, 0.0, 0.12],
+            type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[0.008],
+            rgba=[1.0, 0.3, 0.1, 0.7], group=2)
 
-    # overview camera that always points at the object (auto-frames the action)
+    # overview camera that always points at the object
     spec.worldbody.add_camera(name="overview", pos=[0.95, -0.85, 0.75],
                               mode=mujoco.mjtCamLight.mjCAMLIGHT_TARGETBODY,
                               targetbody="object", fovy=50)
-
-    # --- grasp weld (object <-> gripper), disabled by default ----------------
-    eq = spec.add_equality()
-    eq.type = mujoco.mjtEq.mjEQ_WELD
-    eq.name1 = "2f85_base"
-    eq.name2 = "object"
-    eq.objtype = mujoco.mjtObj.mjOBJ_BODY
-    eq.active = False
-    eq.name = "grasp_weld"
-    # weld data: [anchor(3), relpose pos(3), relpose quat(4), torquescale(1)]
-    eq.data = np.array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1], dtype=float)
 
     return spec
 

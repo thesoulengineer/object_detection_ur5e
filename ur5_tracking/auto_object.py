@@ -1,9 +1,8 @@
 """Automatic object driver (used by --auto mode).
 
 Kinematically moves the object across the work surface to a random target, then
-leaves it stationary, which makes the FSM detect "left" and retrieve it. Only
-active while the FSM is in TRACK (i.e. the object is not being held). After the
-object is returned home and tracking resumes, the next cycle can start.
+leaves it stationary while the arm hovers above.  Only active while the tracker
+is in TRACK state.
 """
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ class AutoObjectDriver:
         c = np.asarray(ws["center"], float)[:2]
         h = np.asarray(ws["size"], float)[:2] / 2.0 - 0.06   # margin from the edge
         self.lo, self.hi = c - h, c + h
-        self.home_xy = cfg.arr("home_return", "position")[:2]
+        self.spawn_xy = cfg.arr("object", "spawn")[:2]
         self.speed = float(cfg.get("tracking", "move_speed", default=0.05)) * 2.5
 
         self._target = None
@@ -40,7 +39,7 @@ class AutoObjectDriver:
 
         if not self._moving and t > self._cooldown_until:
             tgt = self._new_target()
-            while np.linalg.norm(tgt - self.home_xy) < 0.12:   # ensure it triggers a retrieve
+            while np.linalg.norm(tgt - self.spawn_xy) < 0.08:
                 tgt = self._new_target()
             self._target, self._moving = tgt, True
 

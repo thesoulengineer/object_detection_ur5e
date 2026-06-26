@@ -22,10 +22,12 @@ robot:
   joint_limits_lower: [-6.2831, -6.2831, -3.1415, -6.2831, -6.2831, -6.2831]
   joint_limits_upper: [ 6.2831,  6.2831,  3.1415,  6.2831,  6.2831,  6.2831]
 
-gripper:
-  menagerie_2f85_dir: "mujoco_menagerie/robotiq_2f85"
-  open_ctrl: 0.0                      # actuator ctrl when open
-  close_ctrl: 255.0                   # actuator ctrl when closed
+# gripper: not available in current lab setup; Robotiq 2F-85 parameters preserved
+#   for future use when a gripper is added.
+# gripper:
+#   menagerie_2f85_dir: "mujoco_menagerie/robotiq_2f85"
+#   open_ctrl: 0.0
+#   close_ctrl: 255.0
 
 camera:
   menagerie_d435i_dir: "mujoco_menagerie/realsense_d435i"
@@ -65,22 +67,28 @@ object:
   mass:  0.2                          # kg
   rgba:  [0.15, 0.55, 0.95, 1.0]
 
-home_return:
-  position: [-0.13, 0.45, 0.025]      # where the object is placed back (default = spawn)
+# home_return: not used in hover-tracking mode; preserved for pick-and-place.
+# home_return:
+#   position: [-0.13, 0.45, 0.025]
 
-# --- tracking (gaze) behaviour ----------------------------------------------
+# --- tracking / hover behaviour ---------------------------------------------
 tracking:
-  perch_joints: [-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]  # "ready" pose
-  idle_speed: 0.02        # m/s; below this the object is considered stationary
-  idle_time:  1.5         # s; stationary this long => "left" => retrieve
+  perch_joints: [-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]  # "ready" / retreat pose
+  hover_height: 0.20      # m above the object's z position while hovering
   move_speed: 0.05        # m/s; reference speed used by the auto object driver
-  gaze_pos_weight: 2.0    # weight to hold the perch position while aiming
+  # Axis-aligned workspace box (robot base frame). Arm retreats to perch when
+  # the object is outside these bounds. Omit an axis to leave it unbounded.
+  workspace:
+    x: [-0.65,  0.65]
+    y:  [0.05,  0.85]
+    z:  [-0.30,  0.60]
 
-# --- pick-and-place parameters ----------------------------------------------
-pick:
-  hover_height: 0.14      # m above the object before descending
-  reach_tol: 0.015        # m; "target reached" tolerance
-  gripper_settle_s: 0.6   # s to open/close the gripper
+# --- pick-and-place parameters (stubbed — gripper not available) ------------
+# These values are read by RetrieveFSM.__init__ for future compatibility.
+# pick:
+#   hover_height: 0.14
+#   reach_tol: 0.015
+#   gripper_settle_s: 0.6
 
 # --- hardware deployment (Phase 2) ------------------------------------------
 # Uncomment and fill in when deploying to real hardware (Windows, no ROS2).

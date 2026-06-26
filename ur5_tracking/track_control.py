@@ -1,10 +1,10 @@
-"""Low-level control for the track / pick / return task.
+"""Low-level control for the hover-tracking task.
 
-TrackController solves Jacobian IK to reach a Cartesian target while aiming
-the tool +z axis at a direction, then delegates all state reads and actuator
+TrackController solves Jacobian IK to reach a Cartesian target while keeping
+the tool pointing roughly downward, then delegates all state reads and actuator
 writes to a RobotInterface (sim or hardware).
 
-Convention: the tool approach axis is the pinch site's local +z axis.
+Convention: the tool control point is the ee_cam_site on the flange.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class TrackController:
                                  for j in self.joint_names])
         self.lo = cfg.arr("robot", "joint_limits_lower")
         self.hi = cfg.arr("robot", "joint_limits_upper")
-        self.pinch = nid(mujoco.mjtObj.mjOBJ_SITE, "2f85_pinch")
+        self.pinch = nid(mujoco.mjtObj.mjOBJ_SITE, "ee_cam_site")
 
         self._jacp = np.zeros((3, model.nv))
         self._jacr = np.zeros((3, model.nv))
@@ -43,9 +43,7 @@ class TrackController:
     def get_time(self) -> float:          return self.iface.get_time()
 
     # -- delegated actuator commands ------------------------------------------
-    def command_arm(self, q_des) -> None:           self.iface.command_arm(q_des)
-    def command_gripper(self, close: bool) -> None: self.iface.command_gripper(close)
-    def set_grasp(self, on: bool) -> None:          self.iface.set_grasp(on)
+    def command_arm(self, q_des) -> None: self.iface.command_arm(q_des)
 
     # -- sim-only passthrough (AutoObjectDriver; never called in hardware mode)
     def set_object_pose(self, pos, quat=None, vel=None) -> None:

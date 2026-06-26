@@ -1,12 +1,14 @@
 """HardwareInterface: RobotInterface backed by real UR5e hardware.
 
-Arm:     ur-rtde  (RTDEControlInterface + RTDEReceiveInterface)
-Gripper: pyrobotiqgripper over USB-RS485 Modbus
-Vision:  ArucoDetector (D435i RGB stream)
+Arm:    ur-rtde  (RTDEControlInterface + RTDEReceiveInterface)
+Vision: ArucoDetector (D435i RGB stream)
+
+Note: Robotiq 2F-85 gripper support is stubbed out — no gripper is available
+in the current lab setup.  The command_gripper / set_grasp methods are removed;
+re-add them when a gripper is available.
 
 Install dependencies:
-    pip install ur-rtde pyrobotiqgripper minimalmodbus
-    pip install pyrealsense2 opencv-contrib-python
+    pip install ur-rtde pyrealsense2 opencv-contrib-python
 
 Usage (from track_and_retrieve.py --hardware):
     iface = HardwareInterface(model, cfg)
@@ -42,7 +44,7 @@ class HardwareInterface(RobotInterface):
             model.jnt_qposadr[nid(mujoco.mjtObj.mjOBJ_JOINT, j)]
             for j in joint_names
         ])
-        self._pinch_id = nid(mujoco.mjtObj.mjOBJ_SITE, "2f85_pinch")
+        self._pinch_id = nid(mujoco.mjtObj.mjOBJ_SITE, "ee_cam_site")
         self._lo = cfg.arr("robot", "joint_limits_lower")
         self._hi = cfg.arr("robot", "joint_limits_upper")
 
@@ -52,7 +54,6 @@ class HardwareInterface(RobotInterface):
         # Hardware objects (populated by connect())
         self._ctrl  = None   # RTDEControlInterface
         self._recv  = None   # RTDEReceiveInterface
-        self._grip  = None   # RobotiqGripper
 
         # ArUco detector (populated by connect())
         self._detector = None
@@ -87,17 +88,6 @@ class HardwareInterface(RobotInterface):
         self._recv = rtde_receive.RTDEReceiveInterface(arm_ip)
         print("[HW] Arm connected.")
 
-        gripper_port = self._hw.get("gripper_port", "COM3")
-        try:
-            from pyrobotiq import RobotiqGripper
-            self._grip = RobotiqGripper()
-            self._grip.connect(gripper_port, 115200)
-            self._grip.activate()
-            print(f"[HW] Gripper connected on {gripper_port}.")
-        except Exception as e:
-            print(f"[HW] WARNING: Gripper not available ({e}). Continuing without gripper.")
-            self._grip = None
-
         try:
             from .aruco_detector import ArucoDetector
             self._detector = ArucoDetector(self._cfg)
@@ -110,11 +100,6 @@ class HardwareInterface(RobotInterface):
         """Cleanly shut down all hardware connections."""
         if self._detector:
             self._detector.stop()
-        if self._grip:
-            try:
-                self._grip.disconnect()
-            except Exception:
-                pass
         if self._ctrl:
             try:
                 self._ctrl.stopScript()
@@ -157,17 +142,6 @@ class HardwareInterface(RobotInterface):
         else:
             # Blocking move (transit phases — APPROACH, CARRY, RETREAT)
             self._ctrl.moveJ(q, self._arm_speed, self._arm_accel, asynchronous=True)
-
-    def command_gripper(self, close: bool) -> None:
-        if self._grip is None:
-            return
-        if close:
-            self._grip.move(position=255, speed=150, force=100)
-        else:
-            self._grip.move(position=0,   speed=150, force=50)
-
-    def set_grasp(self, on: bool) -> None:
-        pass  # no weld constraint on hardware; physical contact holds the object
 
     def get_time(self) -> float:
         return time.monotonic()
